@@ -14,6 +14,7 @@ export interface ScamAnalysisResult {
   recommendedActions: string[];
   hasFinancialDanger: boolean;
   isDemoMode?: boolean;
+  fallbackReason?: string;
 }
 
 export interface SimplifyResult {
@@ -22,6 +23,7 @@ export interface SimplifyResult {
   safeGuidance?: string;
   disclaimer?: string;
   isDemoMode?: boolean;
+  fallbackReason?: string;
 }
 
 export interface NextStepResult {
@@ -30,6 +32,7 @@ export interface NextStepResult {
   contactToReach?: string;
   emergencyNotice?: string;
   isDemoMode?: boolean;
+  fallbackReason?: string;
 }
 
 export type ReminderCategory = 'medicine' | 'appointment' | 'bill' | 'custom';

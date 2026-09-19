@@ -468,6 +468,9 @@ Rules:
     // Expose only a stable category. Never log prompts, keys, or provider messages.
     const classified = classifyGeminiError(err);
     console.error(`Gemini request failed: ${classified.code}`);
-    throw classified;
+    return {
+      ...getDemoResponse(task, userInput, language),
+      fallbackReason: classified.code,
+    };
   }
 }

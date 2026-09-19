@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
       success: true,
       data: result,
       isDemoMode: Boolean((result as { isDemoMode?: boolean }).isDemoMode),
+      diagnosticCode: (result as { fallbackReason?: string }).fallbackReason,
     }, { headers: { ...NO_STORE_HEADERS, 'X-RateLimit-Remaining': String(rateLimit.remaining) } });
   } catch (error: unknown) {
     if (error instanceof GeminiServiceError) {
