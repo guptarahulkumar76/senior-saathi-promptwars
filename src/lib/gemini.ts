@@ -45,8 +45,6 @@ async function generateJson(ai: GoogleGenAI, prompt: string, temperature: number
     ai.interactions.create({
       model: GEMINI_MODEL,
       input: prompt,
-      response_mime_type: 'application/json',
-      store: false,
       stream: false,
     })
   );
