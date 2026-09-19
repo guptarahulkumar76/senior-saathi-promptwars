@@ -10,7 +10,7 @@ import { isValidTaskResponse } from './response-validation.ts';
 
 // Authorization keys use the current Interactions API and a stable Gemini 3 model.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const GEMINI_TIMEOUT_MS = 15_000;
+const GEMINI_TIMEOUT_MS = 40_000;
 
 export type GeminiDiagnosticCode =
   | 'AI_AUTH_ERROR'
