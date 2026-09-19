@@ -82,7 +82,7 @@ export default function Home() {
           </p>
           <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 pt-1">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>PromptWars Warm-up Challenge: AI for Senior Citizens</span>
+            <span>PromptWars : AI for Senior Citizens</span>
           </div>
         </div>
       </footer>
