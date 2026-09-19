@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limiter';
-import { runGeminiTask } from '@/lib/gemini';
+import { GeminiServiceError, runGeminiTask } from '@/lib/gemini';
 import { MAX_REQUEST_BYTES, validateGeminiRequest } from '@/lib/api-validation';
 
 export const runtime = 'nodejs';
@@ -80,6 +80,16 @@ export async function POST(req: NextRequest) {
       isDemoMode: Boolean((result as { isDemoMode?: boolean }).isDemoMode),
     }, { headers: { ...NO_STORE_HEADERS, 'X-RateLimit-Remaining': String(rateLimit.remaining) } });
   } catch (error: unknown) {
+    if (error instanceof GeminiServiceError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'The AI service is temporarily unavailable. Please try again shortly.',
+          diagnosticCode: error.code,
+        },
+        { status: 502, headers: NO_STORE_HEADERS }
+      );
+    }
     const errorMsg = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
       {

@@ -12,6 +12,24 @@ import { isValidTaskResponse } from './response-validation.ts';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEMINI_TIMEOUT_MS = 15_000;
 
+export type GeminiDiagnosticCode =
+  | 'AI_AUTH_ERROR'
+  | 'AI_QUOTA_ERROR'
+  | 'AI_MODEL_ERROR'
+  | 'AI_TIMEOUT'
+  | 'AI_RESPONSE_FORMAT_ERROR'
+  | 'AI_UPSTREAM_ERROR';
+
+export class GeminiServiceError extends Error {
+  readonly code: GeminiDiagnosticCode;
+
+  constructor(code: GeminiDiagnosticCode) {
+    super('Gemini service request failed');
+    this.name = 'GeminiServiceError';
+    this.code = code;
+  }
+}
+
 let cachedClient: GoogleGenAI | null = null;
 
 function getGeminiClient(apiKey: string) {
@@ -33,7 +51,32 @@ async function withTimeout<T>(operation: Promise<T>): Promise<T> {
 
 function parseTaskResponse<T>(task: TaskType, rawText: string, fallback: T): T {
   const parsed = extractJson<unknown>(rawText, fallback);
-  return isValidTaskResponse(task, parsed) ? (parsed as T) : fallback;
+  if (!isValidTaskResponse(task, parsed) || parsed === fallback) {
+    throw new GeminiServiceError('AI_RESPONSE_FORMAT_ERROR');
+  }
+  return parsed as T;
+}
+
+function classifyGeminiError(error: unknown): GeminiServiceError {
+  if (error instanceof GeminiServiceError) return error;
+
+  const candidate = error as { status?: number; code?: number | string; message?: string };
+  const status = Number(candidate?.status || candidate?.code || 0);
+  const message = (candidate?.message || '').toLowerCase();
+
+  if (status === 401 || status === 403 || message.includes('api key')) {
+    return new GeminiServiceError('AI_AUTH_ERROR');
+  }
+  if (status === 429 || message.includes('quota') || message.includes('resource exhausted')) {
+    return new GeminiServiceError('AI_QUOTA_ERROR');
+  }
+  if (status === 404 || message.includes('model') && message.includes('not found')) {
+    return new GeminiServiceError('AI_MODEL_ERROR');
+  }
+  if (message.includes('timed out') || message.includes('timeout')) {
+    return new GeminiServiceError('AI_TIMEOUT');
+  }
+  return new GeminiServiceError('AI_UPSTREAM_ERROR');
 }
 
 /**
@@ -422,11 +465,9 @@ Rules:
     );
 
   } catch (err: unknown) {
-    // Sanitize any error so API keys are never exposed in logs or messages
-    if (process.env.NODE_ENV === 'development') {
-      const category = err instanceof Error ? err.name : 'UnknownError';
-      console.error(`Gemini request failed (${category}); using the safe fallback.`);
-    }
-    return getDemoResponse(task, userInput, language);
+    // Expose only a stable category. Never log prompts, keys, or provider messages.
+    const classified = classifyGeminiError(err);
+    console.error(`Gemini request failed: ${classified.code}`);
+    throw classified;
   }
 }
