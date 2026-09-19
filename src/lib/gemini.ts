@@ -6,9 +6,35 @@ import type {
   SimplifyResult,
   NextStepResult,
 } from './types.ts';
+import { isValidTaskResponse } from './response-validation.ts';
 
 // Read configured model from environment or fallback to gemini-2.5-flash
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_TIMEOUT_MS = 15_000;
+
+let cachedClient: GoogleGenAI | null = null;
+
+function getGeminiClient(apiKey: string) {
+  if (!cachedClient) cachedClient = new GoogleGenAI({ apiKey });
+  return cachedClient;
+}
+
+async function withTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('Gemini request timed out')), GEMINI_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function parseTaskResponse<T>(task: TaskType, rawText: string, fallback: T): T {
+  const parsed = extractJson<unknown>(rawText, fallback);
+  return isValidTaskResponse(task, parsed) ? (parsed as T) : fallback;
+}
 
 /**
  * Extracts and parses JSON from Gemini's response safely.
@@ -161,32 +187,6 @@ export function getDemoResponse(
       };
     }
 
-    if (isSafeStatement) {
-      return {
-        riskLevel: 'Likely Safe',
-        confidenceScore: 92,
-        warningSigns: isHindi ? [
-          'कोई तात्कालिक खतरा नहीं मिला',
-          'संदेश में कोई लिंक, OTP या अज्ञात नंबर पर कॉल करने का अनुरोध नहीं है'
-        ] : [
-          'No immediate red flags detected',
-          'The message does not contain suspicious links or requests for secret credentials'
-        ],
-        explanation: isHindi
-          ? 'यह आपके बैंक या सेवा प्रदाता की सामान्य सूचना प्रतीत होती है। इसमें कोई लिंक या पिन नहीं मांगा गया है।'
-          : 'This appears to be a standard transactional notification. No sensitive information or urgent action was requested.',
-        recommendedActions: isHindi ? [
-          'यह सुरक्षित है, लेकिन कभी भी बैंक के नाम पर आने वाले किसी लिंक पर अपना पिन न डालें।',
-          'संदेह होने पर केवल अपनी बैंक पासबुक या आधिकारिक ऐप में जांचें।'
-        ] : [
-          'Keep this for your records. No immediate action required.',
-          'Always remember: Your bank will never ask for your PIN, OTP, or CVV.'
-        ],
-        hasFinancialDanger: false,
-        isDemoMode: true,
-      };
-    }
-
     return {
       riskLevel: 'Be Careful',
       confidenceScore: 75,
@@ -286,7 +286,7 @@ export async function runGeminiTask(
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = getGeminiClient(apiKey);
     const isHindi = language === 'hi';
 
     if (task === 'scam-check') {
@@ -308,7 +308,7 @@ STRICT SAFETY RULES:
   "hasFinancialDanger": boolean
 }`;
 
-      const response = await ai.models.generateContent({
+      const response = await withTimeout(ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: [
           {
@@ -322,11 +322,13 @@ STRICT SAFETY RULES:
         ],
         config: {
           temperature: 0.1, // Low temperature for high consistency and safety
+          responseMimeType: 'application/json',
         }
-      });
+      }));
 
       const responseText = response?.text || '';
-      const parsed = extractJson<ScamAnalysisResult>(
+      const parsed = parseTaskResponse<ScamAnalysisResult>(
+        'scam-check',
         responseText,
         getDemoResponse('scam-check', userInput, language) as ScamAnalysisResult
       );
@@ -350,7 +352,7 @@ Rules:
   "emergencyNotice": "optional emergency helpline reminder"
 }`;
 
-      const response = await ai.models.generateContent({
+      const response = await withTimeout(ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: [
           {
@@ -364,11 +366,13 @@ Rules:
         ],
         config: {
           temperature: 0.2,
+          responseMimeType: 'application/json',
         }
-      });
+      }));
 
       const responseText = response?.text || '';
-      return extractJson<NextStepResult>(
+      return parseTaskResponse<NextStepResult>(
+        'next-step',
         responseText,
         getDemoResponse('next-step', userInput, language) as NextStepResult
       );
@@ -392,7 +396,7 @@ Rules:
   "disclaimer": "safety disclaimer if medical, financial, or emergency, otherwise empty"
 }`;
 
-    const response = await ai.models.generateContent({
+    const response = await withTimeout(ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [
         {
@@ -406,20 +410,23 @@ Rules:
       ],
       config: {
         temperature: 0.3,
+        responseMimeType: 'application/json',
       }
-    });
+    }));
 
     const responseText = response?.text || '';
-    return extractJson<SimplifyResult>(
+    return parseTaskResponse<SimplifyResult>(
+      'simplify',
       responseText,
       getDemoResponse('simplify', userInput, language) as SimplifyResult
     );
 
   } catch (err: unknown) {
     // Sanitize any error so API keys are never exposed in logs or messages
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    const sanitizedError = errorMessage.replace(new RegExp(apiKey, 'g'), '[REDACTED]');
-    console.error('Gemini call encountered error, falling back to demo mode:', sanitizedError);
+    if (process.env.NODE_ENV === 'development') {
+      const category = err instanceof Error ? err.name : 'UnknownError';
+      console.error(`Gemini request failed (${category}); using the safe fallback.`);
+    }
     return getDemoResponse(task, userInput, language);
   }
 }

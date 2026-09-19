@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSenior } from '@/context/SeniorContext';
 import {
   ShieldAlert,
@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ScamAnalysisResult, ScamRiskLevel } from '@/lib/types';
+import { requestGemini } from '@/lib/api-client';
 
 export const ScamChecker: React.FC = () => {
   const {
@@ -32,6 +33,9 @@ export const ScamChecker: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<ScamAnalysisResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => requestControllerRef.current?.abort(), []);
 
   // Pre-configured realistic test cases
   const sampleMessages = isHindi
@@ -85,27 +89,22 @@ export const ScamChecker: React.FC = () => {
     const text = textToSubmit || messageText;
     if (!text.trim()) return;
 
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setIsAnalyzing(true);
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: 'scam-check',
-          input: text.trim(),
-          language,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to analyze message.');
-      }
-
-      setResult(data.data as ScamAnalysisResult);
+      const data = await requestGemini<ScamAnalysisResult>(
+        'scam-check',
+        text,
+        language,
+        controller.signal
+      );
+      setResult(data);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       setErrorMessage(
         err instanceof Error
           ? err.message
@@ -114,7 +113,10 @@ export const ScamChecker: React.FC = () => {
           : 'Failed to inspect message. Please try again.'
       );
     } finally {
-      setIsAnalyzing(false);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+        setIsAnalyzing(false);
+      }
     }
   };
 

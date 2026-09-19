@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSenior } from '@/context/SeniorContext';
 import {
   Mic,
@@ -21,6 +21,7 @@ import {
   isSpeechRecognitionSupported,
 } from '@/lib/speech';
 import { SimplifyResult, NextStepResult } from '@/lib/types';
+import { requestGemini } from '@/lib/api-client';
 
 export const AskSaathi: React.FC = () => {
   const {
@@ -40,6 +41,7 @@ export const AskSaathi: React.FC = () => {
   const [result, setResult] = useState<SimplifyResult | null>(null);
   const [nextSteps, setNextSteps] = useState<NextStepResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const sampleQuestions = isHindi
     ? [
@@ -59,6 +61,7 @@ export const AskSaathi: React.FC = () => {
   useEffect(() => {
     return () => {
       if (speechCancelFn) speechCancelFn();
+      requestControllerRef.current?.abort();
     };
   }, [speechCancelFn]);
 
@@ -101,28 +104,23 @@ export const AskSaathi: React.FC = () => {
     const textToSubmit = queryText || inputQuery;
     if (!textToSubmit.trim()) return;
 
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setIsLoading(true);
     setErrorMessage(null);
     setNextSteps(null);
 
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: 'simplify',
-          input: textToSubmit.trim(),
-          language,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to simplify information.');
-      }
-
-      setResult(data.data as SimplifyResult);
+      const data = await requestGemini<SimplifyResult>(
+        'simplify',
+        textToSubmit,
+        language,
+        controller.signal
+      );
+      setResult(data);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       setErrorMessage(
         err instanceof Error
           ? err.message
@@ -131,13 +129,19 @@ export const AskSaathi: React.FC = () => {
           : 'Could not get an answer. Please try again.'
       );
     } finally {
-      setIsLoading(false);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   };
 
   // Button 1: "Explain More Simply"
   const handleExplainMoreSimply = async () => {
     if (!inputQuery.trim() && !result) return;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setIsLoading(true);
     setErrorMessage(null);
 
@@ -146,26 +150,21 @@ export const AskSaathi: React.FC = () => {
     }`;
 
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: 'simplify',
-          input: promptText,
-          language,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to simplify further.');
-      }
-
-      setResult(data.data as SimplifyResult);
+      const data = await requestGemini<SimplifyResult>(
+        'simplify',
+        promptText,
+        language,
+        controller.signal
+      );
+      setResult(data);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       setErrorMessage(err instanceof Error ? err.message : 'Error simplifying further.');
     } finally {
-      setIsLoading(false);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   };
 
@@ -194,30 +193,28 @@ export const AskSaathi: React.FC = () => {
     const contextText = result ? `${inputQuery}: ${result.summary}` : inputQuery;
     if (!contextText.trim()) return;
 
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: 'next-step',
-          input: contextText,
-          language,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to fetch next steps.');
-      }
-
-      setNextSteps(data.data as NextStepResult);
+      const data = await requestGemini<NextStepResult>(
+        'next-step',
+        contextText,
+        language,
+        controller.signal
+      );
+      setNextSteps(data);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       setErrorMessage(err instanceof Error ? err.message : 'Could not fetch next steps.');
     } finally {
-      setIsLoading(false);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   };
 

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { checkRateLimit } from '../src/lib/rate-limiter.ts';
+import { MAX_INPUT_LENGTH, validateGeminiRequest } from '../src/lib/api-validation.ts';
 
 describe('API Input Validation & Rate Limiting', () => {
   it('should accept valid task types', () => {
@@ -12,12 +13,11 @@ describe('API Input Validation & Rate Limiting', () => {
   });
 
   it('should enforce maximum input character limits of 2000 characters', () => {
-    const maxLen = 2000;
     const normalText = 'What is the procedure to check my pension status?';
-    const oversizedText = 'A'.repeat(2001);
+    const oversizedText = 'A'.repeat(MAX_INPUT_LENGTH + 1);
 
-    assert.strictEqual(normalText.length <= maxLen, true);
-    assert.strictEqual(oversizedText.length <= maxLen, false);
+    assert.strictEqual(normalText.length <= MAX_INPUT_LENGTH, true);
+    assert.strictEqual(oversizedText.length <= MAX_INPUT_LENGTH, false);
   });
 
   it('should reject empty or whitespace-only inputs', () => {
@@ -42,5 +42,20 @@ describe('API Input Validation & Rate Limiting', () => {
     const blocked = checkRateLimit(testId, limit, windowMs);
     assert.strictEqual(blocked.allowed, false, '6th request should be blocked by rate limiter');
     assert.strictEqual(blocked.remaining, 0);
+  });
+
+  it('normalizes valid API input and defaults language safely', () => {
+    const result = validateGeminiRequest({ task: 'simplify', input: '  Explain DigiLocker  ' });
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.value.input, 'Explain DigiLocker');
+      assert.strictEqual(result.value.language, 'en');
+    }
+  });
+
+  it('rejects invalid task, language, and oversized input values', () => {
+    assert.strictEqual(validateGeminiRequest({ task: 'delete', input: 'x' }).ok, false);
+    assert.strictEqual(validateGeminiRequest({ task: 'simplify', input: 'x', language: 'fr' }).ok, false);
+    assert.strictEqual(validateGeminiRequest({ task: 'simplify', input: 'x'.repeat(MAX_INPUT_LENGTH + 1) }).ok, false);
   });
 });

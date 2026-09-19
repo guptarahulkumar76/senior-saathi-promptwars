@@ -4,19 +4,11 @@ interface RateLimitRecord {
 }
 
 const rateLimitStore = new Map<string, RateLimitRecord>();
+const MAX_TRACKED_CLIENTS = 5_000;
 
-// Clean up stale entries every 5 minutes
-if (typeof setInterval !== 'undefined') {
-  const timer = setInterval(() => {
-    const now = Date.now();
-    for (const [key, value] of rateLimitStore.entries()) {
-      if (now > value.resetTime) {
-        rateLimitStore.delete(key);
-      }
-    }
-  }, 300000);
-  if (timer && typeof timer === 'object' && 'unref' in timer) {
-    (timer as { unref: () => void }).unref();
+function removeExpiredRecords(now: number) {
+  for (const [key, value] of rateLimitStore.entries()) {
+    if (now > value.resetTime) rateLimitStore.delete(key);
   }
 }
 
@@ -32,6 +24,7 @@ export function checkRateLimit(
   windowMs = 60000
 ): { allowed: boolean; remaining: number; resetTime: number } {
   const now = Date.now();
+  if (rateLimitStore.size >= MAX_TRACKED_CLIENTS) removeExpiredRecords(now);
   const record = rateLimitStore.get(identifier);
 
   if (!record || now > record.resetTime) {

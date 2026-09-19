@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limiter';
 import { runGeminiTask } from '@/lib/gemini';
-import { TaskType, Language } from '@/lib/types';
+import { MAX_REQUEST_BYTES, validateGeminiRequest } from '@/lib/api-validation';
 
-// Maximum allowed character length for user queries
-const MAX_INPUT_LENGTH = 2000;
+export const runtime = 'nodejs';
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, max-age=0',
+  'X-Content-Type-Options': 'nosniff',
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +17,7 @@ export async function POST(req: NextRequest) {
     const realIp = req.headers.get('x-real-ip');
     const clientIdentifier = forwardedFor?.split(',')[0].trim() || realIp || 'anonymous_user';
 
-    const rateLimit = checkRateLimit(clientIdentifier, 25, 60000); // 25 requests per minute
+    const rateLimit = checkRateLimit(clientIdentifier, 20, 60000);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {
@@ -24,63 +28,57 @@ export async function POST(req: NextRequest) {
           status: 429,
           headers: {
             'Retry-After': Math.ceil((rateLimit.resetTime - Date.now()) / 1000).toString(),
+            ...NO_STORE_HEADERS,
           },
         }
       );
     }
 
     // 2. Parse & Validate Payload
-    let body;
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return NextResponse.json(
+        { success: false, error: 'Request is too large.' },
+        { status: 413, headers: NO_STORE_HEADERS }
+      );
+    }
+
+    let body: unknown;
     try {
-      body = await req.json();
+      const rawBody = await req.text();
+      if (new TextEncoder().encode(rawBody).byteLength > MAX_REQUEST_BYTES) {
+        return NextResponse.json(
+          { success: false, error: 'Request is too large.' },
+          { status: 413, headers: NO_STORE_HEADERS }
+        );
+      }
+      body = JSON.parse(rawBody) as unknown;
     } catch {
       return NextResponse.json(
         { success: false, error: 'Invalid request format. Expected JSON.' },
-        { status: 400 }
+        { status: 400, headers: NO_STORE_HEADERS }
       );
     }
 
-    const { task, input, language } = body || {};
-
-    // Validate Task Type
-    const validTasks: TaskType[] = ['simplify', 'scam-check', 'next-step'];
-    if (!task || !validTasks.includes(task)) {
+    const validation = validateGeminiRequest(body);
+    if (!validation.ok) {
       return NextResponse.json(
-        { success: false, error: 'Invalid task type. Supported tasks: simplify, scam-check, next-step.' },
-        { status: 400 }
+        { success: false, error: validation.error },
+        { status: 400, headers: NO_STORE_HEADERS }
       );
     }
 
-    // Validate Input Text
-    if (typeof input !== 'string' || input.trim().length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Please provide a non-empty message or question.' },
-        { status: 400 }
-      );
-    }
-
-    if (input.trim().length > MAX_INPUT_LENGTH) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Message is too long. Please limit your text to ${MAX_INPUT_LENGTH} characters.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate Language
-    const validLanguage: Language = language === 'hi' ? 'hi' : 'en';
+    const { task, input, language } = validation.value;
 
     // 3. Process Task via Server-Side Gemini Handler
     // Privacy note: user text is NEVER logged or saved to server disks
-    const result = await runGeminiTask(task, input.trim(), validLanguage);
+    const result = await runGeminiTask(task, input, language);
 
     return NextResponse.json({
       success: true,
       data: result,
       isDemoMode: Boolean((result as { isDemoMode?: boolean }).isDemoMode),
-    });
+    }, { headers: { ...NO_STORE_HEADERS, 'X-RateLimit-Remaining': String(rateLimit.remaining) } });
   } catch (error: unknown) {
     const errorMsg = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
@@ -89,7 +87,7 @@ export async function POST(req: NextRequest) {
         error: 'Senior Saathi encountered a temporary hiccup. Please try again in a few moments.',
         details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
       },
-      { status: 500 }
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 }
