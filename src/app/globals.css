@@ -1,26 +1,91 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-size-base: 18px;
+  --focus-ring: #2563eb;
+  --bg-primary: #fdfbf7;
+  --text-primary: #1e293b;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Accessible Font Sizing Tiers */
+.font-size-normal {
+  font-size: 18px;
+  line-height: 1.6;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.font-size-large {
+  font-size: 22px;
+  line-height: 1.65;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.font-size-xl {
+  font-size: 26px;
+  line-height: 1.7;
+}
+
+/* High Contrast Mode */
+.high-contrast {
+  background-color: #000000 !important;
+  color: #fef08a !important; /* High contrast amber-200 */
+}
+
+.high-contrast .hc-card {
+  background-color: #0d0d0d !important;
+  border: 3px solid #fef08a !important;
+  color: #ffffff !important;
+}
+
+.high-contrast .hc-text-highlight {
+  color: #fef08a !important;
+}
+
+.high-contrast .hc-btn-primary {
+  background-color: #fef08a !important;
+  color: #000000 !important;
+  border: 2px solid #ffffff !important;
+  font-weight: 800 !important;
+}
+
+.high-contrast .hc-btn-secondary {
+  background-color: #000000 !important;
+  color: #fef08a !important;
+  border: 3px solid #fef08a !important;
+}
+
+.high-contrast .hc-badge-danger {
+  background-color: #450a0a !important;
+  color: #fca5a5 !important;
+  border: 2px solid #ef4444 !important;
+}
+
+.high-contrast .hc-badge-warning {
+  background-color: #422006 !important;
+  color: #fde047 !important;
+  border: 2px solid #eab308 !important;
+}
+
+.high-contrast .hc-badge-safe {
+  background-color: #052e16 !important;
+  color: #86efac !important;
+  border: 2px solid #22c55e !important;
+}
+
+/* Ensure minimum touch target for all interactive elements */
+button, a, input, select, textarea {
+  min-height: 48px;
+}
+
+/* Clear, accessible keyboard focus rings */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 4px solid var(--focus-ring) !important;
+  outline-offset: 3px !important;
+}
+
+/* Smooth transitions */
+* {
+  box-sizing: border-box;
 }
