@@ -8,8 +8,8 @@ import type {
 } from './types.ts';
 import { isValidTaskResponse } from './response-validation.ts';
 
-// Read configured model from environment or fallback to gemini-2.5-flash
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Authorization keys use the current Interactions API and a stable Gemini 3 model.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const GEMINI_TIMEOUT_MS = 15_000;
 
 export type GeminiDiagnosticCode =
@@ -35,6 +35,22 @@ let cachedClient: GoogleGenAI | null = null;
 function getGeminiClient(apiKey: string) {
   if (!cachedClient) cachedClient = new GoogleGenAI({ apiKey });
   return cachedClient;
+}
+
+async function generateJson(ai: GoogleGenAI, prompt: string, temperature: number): Promise<string> {
+  // Keep temperature in the helper signature so task intent remains explicit;
+  // the current Interactions API chooses stable decoding defaults.
+  void temperature;
+  const response = await withTimeout(
+    ai.interactions.create({
+      model: GEMINI_MODEL,
+      input: prompt,
+      response_mime_type: 'application/json',
+      store: false,
+      stream: false,
+    })
+  );
+  return response.output_text || '';
 }
 
 async function withTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -351,25 +367,11 @@ STRICT SAFETY RULES:
   "hasFinancialDanger": boolean
 }`;
 
-      const response = await withTimeout(ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `${systemInstruction}\n\nLanguage: ${isHindi ? 'Hindi' : 'English'}\n\nMessage to examine:\n"""\n${userInput}\n"""`
-              }
-            ]
-          }
-        ],
-        config: {
-          temperature: 0.1, // Low temperature for high consistency and safety
-          responseMimeType: 'application/json',
-        }
-      }));
-
-      const responseText = response?.text || '';
+      const responseText = await generateJson(
+        ai,
+        `${systemInstruction}\n\nLanguage: ${isHindi ? 'Hindi' : 'English'}\n\nMessage to examine:\n"""\n${userInput}\n"""`,
+        0.1
+      );
       const parsed = parseTaskResponse<ScamAnalysisResult>(
         'scam-check',
         responseText,
@@ -395,25 +397,11 @@ Rules:
   "emergencyNotice": "optional emergency helpline reminder"
 }`;
 
-      const response = await withTimeout(ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `${systemInstruction}\n\nSituation:\n"""\n${userInput}\n"""`
-              }
-            ]
-          }
-        ],
-        config: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-        }
-      }));
-
-      const responseText = response?.text || '';
+      const responseText = await generateJson(
+        ai,
+        `${systemInstruction}\n\nSituation:\n"""\n${userInput}\n"""`,
+        0.2
+      );
       return parseTaskResponse<NextStepResult>(
         'next-step',
         responseText,
@@ -439,25 +427,11 @@ Rules:
   "disclaimer": "safety disclaimer if medical, financial, or emergency, otherwise empty"
 }`;
 
-    const response = await withTimeout(ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `${systemInstruction}\n\nUser Question:\n"""\n${userInput}\n"""`
-            }
-          ]
-        }
-      ],
-      config: {
-        temperature: 0.3,
-        responseMimeType: 'application/json',
-      }
-    }));
-
-    const responseText = response?.text || '';
+    const responseText = await generateJson(
+      ai,
+      `${systemInstruction}\n\nUser Question:\n"""\n${userInput}\n"""`,
+      0.3
+    );
     return parseTaskResponse<SimplifyResult>(
       'simplify',
       responseText,
