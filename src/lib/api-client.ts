@@ -1,6 +1,6 @@
 import type { ApiResponse, Language, TaskType } from './types';
 
-const CLIENT_TIMEOUT_MS = 45_000;
+const CLIENT_TIMEOUT_MS = 20_000;
 
 export async function requestGemini<T>(
   task: TaskType,
